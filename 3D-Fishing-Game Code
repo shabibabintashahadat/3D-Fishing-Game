@@ -1,0 +1,973 @@
+from OpenGL.GL import *
+from OpenGL.GLUT import *
+from OpenGL.GLU import *
+from OpenGL.GLUT import GLUT_BITMAP_HELVETICA_18
+import math
+import random
+import time
+
+WATER_LVL = 50
+GRID_LENGTH = 600
+score = 0
+currentLevel = 1
+fish_per_level = 5
+startTime = time.time()
+fishList = []
+MAX_FISH = 12
+fishSpeed = 0.5
+waveTime = 0
+animSpeed = 0.05
+player_position = [0, WATER_LVL, 0]
+player_rot = 0
+
+
+camera_pos = [150, 150, 150]
+underwater_cam_pos = [0, -30, 250]
+surface_cam_pos = [200, 100, 200]
+fovY = 60
+is_underwater = False
+isPaused = False 
+gameTime = 0
+gameOver = False
+hookPos = [0, WATER_LVL, 0]
+hook_is_cast = False
+hookDepth = WATER_LVL
+hook_target_depth = -50
+fishing_line_is_active = False
+hookCastAngle = 0
+hookCastDistance = 0
+hook_wait_time = 0
+hook_waiting = False
+HOOK_WAIT_DURATION = 300
+missedCatches = 0
+maxMisses = 5
+
+
+current_cast_caught = False
+cheatModeOn = False
+auto_cast_time = 0
+cast_with_cheat = False
+
+
+class Fish:
+    def __init__(self):
+        self.x = random.uniform(-GRID_LENGTH / 3, GRID_LENGTH / 3)
+        self.y = random.uniform(-60, 0)
+        self.z = random.uniform(-GRID_LENGTH / 3, GRID_LENGTH / 3)
+        self.fishSize = random.uniform(8, 16)
+        self.speed = random.uniform(0.3, 0.8)
+        self.direction = random.uniform(0, 360)
+        self.fishColor = self.get_random_color()
+        self.fishType = random.choice(['normal', 'gold', 'big'])
+        if self.fishType == 'normal':
+            self.points = 1
+        elif self.fishType == 'gold':
+            self.points = 3
+        else:
+            self.points = 2
+        self.isCaught = False
+        self.baseY = self.y
+        self.swimAnim = random.uniform(0, 360)
+        self.isBeingReeled = False
+        self.originalX = self.x
+        self.originalY = self.y
+        self.originalZ = self.z
+
+    
+    def get_random_color(self):
+        colors = [
+            (1.0, 0.3, 0.2),
+            (0.8, 0.2, 0.2),
+            (0.2, 0.8, 0.3),
+            (1.0, 1.0, 0.2),
+            (0.5, 0.2, 0.8)
+        ]
+        return colors[random.randint(0, len(colors) - 1)]
+
+    
+    def update(self):
+        if self.isCaught:
+            return
+
+        if self.isBeingReeled:
+            self.x = hookPos[0]
+            self.y = hookPos[1] - 10
+            self.z = hookPos[2]
+            return
+
+        self.direction += random.uniform(-5, 5)
+        dx = math.cos(math.radians(self.direction)) * self.speed
+        dz = math.sin(math.radians(self.direction)) * self.speed
+
+        self.x = self.x + dx
+        self.z += dz
+
+        if self.x > GRID_LENGTH / 3 or self.x < -GRID_LENGTH / 3:
+            self.direction = 180 - self.direction
+            if self.x > GRID_LENGTH / 3:
+                self.x = GRID_LENGTH / 3
+            else:
+                self.x = -GRID_LENGTH / 3
+
+        if self.z > GRID_LENGTH / 3 or self.z < -GRID_LENGTH / 3:
+            self.direction = -self.direction
+            if self.z > GRID_LENGTH / 3:
+                self.z = GRID_LENGTH / 3
+            else:
+                self.z = -GRID_LENGTH / 3
+
+        self.swimAnim = self.swimAnim + 2
+        self.y = self.baseY + math.sin(math.radians(self.swimAnim)) * 5
+
+        if self.y > WATER_LVL - 10:
+            self.y = WATER_LVL - 10
+            self.baseY = self.y - 5
+        if self.y < -80:
+            self.y = -80
+            self.baseY = self.y
+
+
+def drawText(x, y, text, font=GLUT_BITMAP_HELVETICA_18):
+    glColor3f(1, 1, 1)
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, 1000, 0, 800)
+
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+
+    glRasterPos2f(x, y)
+    for character in text:
+        glutBitmapCharacter(font, ord(character))
+
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+
+def draw_fisherman():
+    glPushMatrix()
+    glTranslatef(0, 15, 0)
+
+    glColor3f(0.2, 0.4, 0.8)
+    glPushMatrix()
+    glTranslatef(0, 0, 0)
+    glScalef(0.8, 1.5, 0.6)
+    glutSolidCube(12)
+    glPopMatrix()
+
+    glColor3f(0.9, 0.7, 0.6)
+    glPushMatrix()
+    glTranslatef(0, 12, 0)
+    glutSolidCube(8)
+    glPopMatrix()
+
+    glColor3f(0.1, 0.3, 0.1)
+    glPushMatrix()
+    glTranslatef(0, 16, 0)
+    glScalef(1.2, 0.3, 1.2)
+    glutSolidCube(8)
+    glPopMatrix()
+    
+    glColor3f(0.0, 0.0, 0.0)
+    glPushMatrix()
+    glTranslatef(-2, 12, 3)
+    gluSphere(gluNewQuadric(), 0.8, 8, 8)
+    glPopMatrix()
+
+    glPushMatrix()
+    glTranslatef(2, 12, 3)
+    gluSphere(gluNewQuadric(), 0.8, 8, 8)
+    glPopMatrix()
+
+    glColor3f(0.9, 0.7, 0.6)
+    glPushMatrix()
+    glTranslatef(-8, -2, 0)
+    glScalef(0.4, 1, 0.4)
+    glutSolidCube(10)
+    glPopMatrix()
+
+    glPushMatrix()
+    glTranslatef(8, -2, 0)
+    glScalef(0.4, 1, 0.4)
+    glutSolidCube(10)
+    glPopMatrix()
+
+    glColor3f(0.4, 0.2, 0.1)
+    glPushMatrix()
+    glTranslatef(10, -4, 0)
+    glRotatef(30, 0, 0, 1)
+    gluCylinder(gluNewQuadric(), 1, 0.6, 60, 6, 6)
+    glPopMatrix()
+
+    glColor3f(0.1, 0.1, 0.4)
+    glPushMatrix()
+    glTranslatef(-3, -12, 0)
+    glScalef(0.5, 1.2, 0.5)
+    glutSolidCube(8)
+    glPopMatrix()
+    
+    glPushMatrix()
+    glTranslatef(3, -12, 0)
+    glScalef(0.5, 1.2, 0.5)
+    glutSolidCube(8)
+    glPopMatrix()
+
+    glPopMatrix()
+
+
+def draw_boat_surface():
+    glColor3f(0.4, 0.2, 0.1)
+    glPushMatrix()
+    glScalef(4, 0.8, 7)
+    glutSolidCube(10)
+    glPopMatrix()
+
+    glColor3f(0.5, 0.3, 0.15)
+    glPushMatrix()
+    glTranslatef(0, 4, 0)
+    glScalef(3.5, 0.6, 6.5)
+    glutSolidCube(10)
+    glPopMatrix()
+
+    glColor3f(0.6, 0.4, 0.2)
+    glPushMatrix()
+    glTranslatef(0, 7, 0)
+    glScalef(3.2, 0.2, 6.2)
+    glutSolidCube(10)
+    glPopMatrix()
+
+    glColor3f(0.4, 0.2, 0.1)
+    glPushMatrix()
+    glTranslatef(0, 9, -20)
+    glScalef(2.5, 0.4, 1.5)
+    glutSolidCube(10)
+    glPopMatrix()
+
+    glColor3f(0.45, 0.25, 0.12)
+    glPushMatrix()
+    glTranslatef(0, 2, 35)
+    glScalef(2, 1, 1.5)
+    glutSolidCube(8)
+    glPopMatrix()
+
+
+def drawAllShapes():
+    glPushMatrix()
+    glTranslatef(player_position[0], player_position[1], player_position[2])
+    glRotatef(player_rot, 0, 1, 0)
+
+    if is_underwater:
+        glColor3f(0.1, 0.05, 0.02)
+        glPushMatrix()
+        glScalef(3, 0.5, 6)
+        glutSolidCube(10)
+        glPopMatrix()
+
+        glColor3f(0.15, 0.08, 0.03)
+        glPushMatrix()
+        glTranslatef(0, -3, 0)
+        glScalef(2.5, 0.3, 5.5)
+        glutSolidCube(10)
+        glPopMatrix()
+    else:
+        draw_boat_surface()
+
+    glPopMatrix()
+
+    if not is_underwater:
+        glPushMatrix()
+        glTranslatef(player_position[0], player_position[1], player_position[2])
+        glRotatef(player_rot, 0, 1, 0)
+        draw_fisherman()
+        glPopMatrix()
+
+    if fishing_line_is_active:
+        drawFishingLine()
+
+        glPushMatrix()
+        glTranslatef(hookPos[0], hookPos[1], hookPos[2])
+        glColor3f(1.0, 0.0, 0.0)
+        glutSolidCube(5)
+
+        glColor3f(1.0, 1.0, 1.0)
+        glPushMatrix()
+        glScalef(0.5, 0.5, 0.5)
+        glutSolidCube(5)
+        glPopMatrix()
+
+        glPopMatrix()
+
+    if is_underwater:
+        for fish in fishList:
+            if not fish.isCaught:
+                drawFish(fish)
+    else:
+        for fish in fishList:
+            if not fish.isCaught and (fish.y > WATER_LVL - 15 or fish.isBeingReeled):
+                drawFish(fish)
+
+
+def drawFishingLine():
+    glColor3f(1.0, 1.0, 1.0)
+
+    segments = 30
+    for i in range(segments):
+        t = float(i) / float(segments - 1)
+        x = player_position[0] + (hookPos[0] - player_position[0]) * t
+        y = player_position[1] + (hookPos[1] - player_position[1]) * t
+        z = player_position[2] + (hookPos[2] - player_position[2]) * t
+
+        glPushMatrix()
+        glTranslatef(x, y, z)
+        glutSolidCube(1.5)
+        glPopMatrix()
+
+
+def drawFish(fish):
+    glPushMatrix()
+    glTranslatef(fish.x, fish.y, fish.z)
+    glRotatef(fish.direction, 0, 1, 0)
+
+    tail_wave_effect = math.sin(math.radians(fish.swimAnim * 3)) * 10
+
+    if fish.fishType == 'gold':
+        glColor3f(1.0, 0.8, 0.0)
+    else:
+        glColor3f(fish.fishColor[0], fish.fishColor[1], fish.fishColor[2])
+
+    if fish.fishType == 'big':
+        glScalef(1.5, 1.5, 1.5)
+
+    glPushMatrix()
+    glScalef(2.0, 0.8, 1.0)
+    glutSolidCube(fish.fishSize)
+    glPopMatrix()
+
+    glPushMatrix()
+    glTranslatef(-fish.fishSize * 1.2, 0, 0)
+    glRotatef(tail_wave_effect, 0, 1, 0)
+    glScalef(0.6, 1.2, 0.8)
+    glutSolidCube(fish.fishSize * 0.7)
+    glPopMatrix()
+
+    glPushMatrix()
+    glTranslatef(0, fish.fishSize * 0.5, 0)
+    glScalef(1.5, 0.3, 0.1)
+    glutSolidCube(fish.fishSize * 0.5)
+    glPopMatrix()
+
+    glColor3f(1, 1, 1)
+    glPushMatrix()
+    glTranslatef(fish.fishSize * 0.6, fish.fishSize * 0.2, fish.fishSize * 0.3)
+    glutSolidCube(3)
+    glPopMatrix()
+
+    glPushMatrix()
+    glTranslatef(fish.fishSize * 0.6, fish.fishSize * 0.2, -fish.fishSize * 0.3)
+    glutSolidCube(3)
+    glPopMatrix()
+
+    glColor3f(0, 0, 0)
+    glPushMatrix()
+    glTranslatef(fish.fishSize * 0.7, fish.fishSize * 0.2, fish.fishSize * 0.3)
+    glutSolidCube(1.5)
+    glPopMatrix()
+
+    glPushMatrix()
+    glTranslatef(fish.fishSize * 0.7, fish.fishSize * 0.2, -fish.fishSize * 0.3)
+    glutSolidCube(1.5)
+    glPopMatrix()
+
+    glPopMatrix()
+
+
+def draw_surface_water_old():
+    glColor3f(0.1, 0.3, 0.6)
+
+    for i in range(-10, 11, 2):
+        for j in range(-10, 11, 2):
+            x = i * 30
+            z = j * 30
+
+            wave_height = math.sin(waveTime + x * 0.008 + z * 0.008) * 2
+
+            glPushMatrix()
+            glTranslatef(x, WATER_LVL + wave_height, z)
+            glScalef(1, 0.05, 1)
+            glutSolidCube(28)
+            glPopMatrix()
+
+
+def drawWaterSurface():
+    if is_underwater:
+        glColor3f(0.15, 0.4, 0.7)
+        for i in range(-10, 11):
+            for j in range(-10, 11):
+                x_pos = i * 30
+                z_pos = j * 30
+                wave_effect = math.sin(waveTime + x_pos * 0.01 + z_pos * 0.01) * 3
+
+                glPushMatrix()
+                glTranslatef(x_pos, WATER_LVL + wave_effect, z_pos)
+                glScalef(1, 0.1, 1)
+                glutSolidCube(29)
+                glPopMatrix()
+    else:
+        glBegin(GL_QUADS)
+
+        glColor3f(0.05, 0.25, 0.5)
+
+        for i in range(-20, 20):
+            for j in range(-20, 20):
+                x1 = i * 20
+                z1 = j * 20
+                x2 = (i + 1) * 20
+                z2 = (j + 1) * 20
+
+                y1 = WATER_LVL + math.sin(waveTime + x1 * 0.005 + z1 * 0.005) * 2
+                y2 = WATER_LVL + math.sin(waveTime + x2 * 0.005 + z1 * 0.005) * 2
+                y3 = WATER_LVL + math.sin(waveTime + x2 * 0.005 + z2 * 0.005) * 2
+                y4 = WATER_LVL + math.sin(waveTime + x1 * 0.005 + z2 * 0.005) * 2
+
+                if (i + j) % 2 == 0:
+                    glColor3f(0.05, 0.25, 0.5)
+                else:
+                    glColor3f(0.08, 0.28, 0.55)
+
+                glVertex3f(x1, y1, z1)
+                glVertex3f(x2, y2, z1)
+                glVertex3f(x2, y3, z2)
+                glVertex3f(x1, y4, z2)
+
+        glEnd()
+
+
+def drawSeaFloor():
+    glColor3f(0.2, 0.15, 0.1)
+
+    for i in range(-12, 13, 3):
+        for j in range(-12, 13, 3):
+            glPushMatrix()
+            glTranslatef(i * 25, -100, j * 25)
+            glScalef(1, 0.2, 1)
+            glutSolidCube(23)
+            glPopMatrix()
+
+
+def drawEnvironment():
+    if is_underwater:
+        drawSeaFloor()
+
+        glColor3f(0.3, 0.3, 0.3)
+        rock_pos1 = (-100, -95, -100)
+        rock_pos2 = (100, -93, 100)
+        rock_pos3 = (-150, -96, 50)
+        rock_pos4 = (50, -94, -150)
+
+        glPushMatrix()
+        glTranslatef(rock_pos1[0], rock_pos1[1], rock_pos1[2])
+        glutSolidCube(20)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(rock_pos2[0], rock_pos2[1], rock_pos2[2])
+        glutSolidCube(20)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(rock_pos3[0], rock_pos3[1], rock_pos3[2])
+        glutSolidCube(20)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(rock_pos4[0], rock_pos4[1], rock_pos4[2])
+        glutSolidCube(20)
+        glPopMatrix()
+
+        glColor3f(0.1, 0.4, 0.1)
+        seaweed_pos1 = (-80, -100, -80)
+        seaweed_pos2 = (120, -100, 60)
+        seaweed_pos3 = (-60, -100, 120)
+        seaweed_pos4 = (80, -100, -120)
+
+        glPushMatrix()
+        glTranslatef(seaweed_pos1[0], seaweed_pos1[1], seaweed_pos1[2])
+        sway1 = math.sin(waveTime + seaweed_pos1[0] * 0.1) * 5
+        glRotatef(sway1, 1, 0, 0)
+        gluCylinder(gluNewQuadric(), 3, 1, 40, 6, 6)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(seaweed_pos2[0], seaweed_pos2[1], seaweed_pos2[2])
+        sway2 = math.sin(waveTime + seaweed_pos2[0] * 0.1) * 5
+        glRotatef(sway2, 1, 0, 0)
+        gluCylinder(gluNewQuadric(), 3, 1, 40, 6, 6)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(seaweed_pos3[0], seaweed_pos3[1], seaweed_pos3[2])
+        sway3 = math.sin(waveTime + seaweed_pos3[0] * 0.1) * 5
+        glRotatef(sway3, 1, 0, 0)
+        gluCylinder(gluNewQuadric(), 3, 1, 40, 6, 6)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(seaweed_pos4[0], seaweed_pos4[1], seaweed_pos4[2])
+        sway4 = math.sin(waveTime + seaweed_pos4[0] * 0.1) * 5
+        glRotatef(sway4, 1, 0, 0)
+        gluCylinder(gluNewQuadric(), 3, 1, 40, 6, 6)
+        glPopMatrix()
+
+    else:
+        glColor3f(0.2, 0.5, 0.2)
+        for i in range(-5, 6):
+            glPushMatrix()
+            glTranslatef(i * 60, WATER_LVL + 30, -400)
+            glScalef(1, 2, 0.5)
+            glutSolidCube(50)
+            glPopMatrix()
+
+        glColor3f(0.4, 0.2, 0.1)
+        tree_pos1 = (-200, WATER_LVL + 20, -350)
+        tree_pos2 = (150, WATER_LVL + 20, -380)
+
+        glPushMatrix()
+        glTranslatef(tree_pos1[0], tree_pos1[1], tree_pos1[2])
+        gluCylinder(gluNewQuadric(), 5, 3, 40, 6, 6)
+        glColor3f(0.1, 0.4, 0.1)
+        glTranslatef(0, 40, 0)
+        glutSolidCube(25)
+        glPopMatrix()
+
+        glColor3f(0.4, 0.2, 0.1)
+        glPushMatrix()
+        glTranslatef(tree_pos2[0], tree_pos2[1], tree_pos2[2])
+        gluCylinder(gluNewQuadric(), 5, 3, 40, 6, 6)
+        glColor3f(0.1, 0.4, 0.1)
+        glTranslatef(0, 40, 0)
+        glutSolidCube(25)
+        glPopMatrix()
+
+
+def drawBubbles():
+    if not is_underwater:
+        return
+
+    glColor3f(0.8, 0.9, 1.0)
+
+    bubble1_y = -80 + (waveTime * 10 + 0 * 30) % 130
+    bubble1_x = math.sin(0 * 2) * 50
+    bubble1_z = math.cos(0 * 2) * 50
+    glPushMatrix()
+    glTranslatef(bubble1_x, bubble1_y, bubble1_z)
+    glutSolidCube(3)
+    glPopMatrix()
+
+    bubble2_y = -80 + (waveTime * 10 + 1 * 30) % 130
+    bubble2_x = math.sin(1 * 2) * 50
+    bubble2_z = math.cos(1 * 2) * 50
+    glPushMatrix()
+    glTranslatef(bubble2_x, bubble2_y, bubble2_z)
+    glutSolidCube(3)
+    glPopMatrix()
+
+    bubble3_y = -80 + (waveTime * 10 + 2 * 30) % 130
+    bubble3_x = math.sin(2 * 2) * 50
+    bubble3_z = math.cos(2 * 2) * 50
+    glPushMatrix()
+    glTranslatef(bubble3_x, bubble3_y, bubble3_z)
+    glutSolidCube(3)
+    glPopMatrix()
+
+    bubble4_y = -80 + (waveTime * 10 + 3 * 30) % 130
+    bubble4_x = math.sin(3 * 2) * 50
+    bubble4_z = math.cos(3 * 2) * 50
+    glPushMatrix()
+    glTranslatef(bubble4_x, bubble4_y, bubble4_z)
+    glutSolidCube(3)
+    glPopMatrix()
+
+    bubble5_y = -80 + (waveTime * 10 + 4 * 30) % 130
+    bubble5_x = math.sin(4 * 2) * 50
+    bubble5_z = math.cos(4 * 2) * 50
+    glPushMatrix()
+    glTranslatef(bubble5_x, bubble5_y, bubble5_z)
+    glutSolidCube(3)
+    glPopMatrix()
+
+
+def spawnFish():
+    global fishList
+    fishList = []
+    for i in range(MAX_FISH):
+        newFish = Fish()
+        fishList.append(newFish)
+
+
+def updateHook():
+    global hookPos, hook_is_cast, fishing_line_is_active, missedCatches, gameOver, cast_with_cheat, current_cast_caught
+    global hook_wait_time, hook_waiting
+
+    if hook_is_cast:
+        if hookPos[1] > hook_target_depth:
+            hookPos[1] = hookPos[1] - 2
+            progress = (WATER_LVL - hookPos[1]) / (WATER_LVL - hook_target_depth)
+            hookPos[0] = player_position[0] + math.sin(math.radians(hookCastAngle)) * hookCastDistance * progress
+            hookPos[2] = player_position[2] - math.cos(math.radians(hookCastAngle)) * hookCastDistance * progress
+            checkFishCollision()
+        else:
+            hook_is_cast = False
+            hook_waiting = True
+            hook_wait_time = 0
+    elif hook_waiting:
+        hook_wait_time += 1
+        checkFishCollision()
+        if hook_wait_time >= HOOK_WAIT_DURATION:
+            hook_waiting = False
+    elif fishing_line_is_active and hookPos[1] < WATER_LVL:
+        hookPos[1] += 3
+        checkFishCollision()
+        if hookPos[1] >= WATER_LVL:
+            fishing_line_is_active = False
+            for fish in fishList:
+                if fish.isBeingReeled:
+                    fish.isCaught = True
+                    fish.isBeingReeled = False
+            if not current_cast_caught:
+                if not cast_with_cheat:
+                    missedCatches += 1
+                    if missedCatches >= maxMisses:
+                        gameOver = True
+            current_cast_caught = False
+            cast_with_cheat = False
+
+
+def checkFishCollision():
+    global score, currentLevel, caught, current_cast_caught
+
+    if not fishing_line_is_active:
+        return False
+    caught = False
+    for fish in fishList:
+        if fish.isCaught or fish.isBeingReeled:
+            continue
+
+        dx = fish.x - hookPos[0]
+        dy = fish.y - hookPos[1]
+        dz = fish.z - hookPos[2]
+        distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+        if distance < fish.fishSize + 8:
+            fish.isBeingReeled = True
+            score = score + fish.points
+            caught = True
+            current_cast_caught = True
+            if score >= currentLevel * fish_per_level:
+                currentLevel = currentLevel + 1
+                spawnFish()
+            return True
+    return caught
+
+
+def autoPlayFunction():
+    global fishing_line_is_active, hook_is_cast, hookPos, hookCastAngle, hookCastDistance,cast_with_cheat,auto_cast_time
+
+    if not cheatModeOn:
+        return
+
+    if not fishing_line_is_active:
+        auto_cast_time = auto_cast_time + 1
+        if auto_cast_time > 30:
+            nearestFish = None
+            nearestDistance = 999999
+
+            for fish in fishList:
+                if not fish.isCaught:
+                    fishDist = math.sqrt(
+                        (fish.x - player_position[0]) * (fish.x - player_position[0]) +
+                        (fish.z - player_position[2]) * (fish.z - player_position[2])
+                    )
+                    if fishDist < nearestDistance and fishDist < 150:
+                        nearestDistance = fishDist
+                        nearestFish = fish
+
+            if nearestFish != None:
+                dx = nearestFish.x - player_position[0]
+                dz = nearestFish.z - player_position[2]
+                hookCastAngle = math.degrees(math.atan2(dx, -dz))
+                hookCastDistance = math.sqrt(dx * dx + dz * dz)
+
+                fishing_line_is_active = True
+                hook_is_cast = True
+                hookPos = [player_position[0], WATER_LVL, player_position[2]]
+                auto_cast_time = 0
+                cast_with_cheat = True
+    else:
+        if not hook_is_cast and hookPos[1] <= hook_target_depth + 10:
+            fishNearby = False
+            for fish in fishList:
+                if not fish.isCaught:
+                    fishDistance = math.sqrt(
+                        (fish.x - hookPos[0]) * (fish.x - hookPos[0]) +
+                        (fish.y - hookPos[1]) * (fish.y - hookPos[1]) +
+                        (fish.z - hookPos[2]) * (fish.z - hookPos[2])
+                    )
+                    if fishDistance < 30:
+                        fishNearby = True
+                        break
+
+            if not fishNearby:
+                hook_is_cast = False
+
+
+def keyboardHandler(key, x, y):
+    global player_position, player_rot, fishing_line_is_active, hook_is_cast, hookPos, auto_cast_time
+    global isPaused, score, currentLevel, startTime, cheatModeOn, hookCastAngle, hookCastDistance
+    global is_underwater, camera_pos, underwater_cam_pos, surface_cam_pos, gameOver, missedCatches, cast_with_cheat
+
+    if key == b'r':
+        score = 0
+        currentLevel = 1
+        startTime = time.time()
+        spawnFish()
+        player_position = [0, WATER_LVL, 0]
+        player_rot = 0
+        fishing_line_is_active = False
+        hook_is_cast = False
+        hookPos = [0, WATER_LVL, 0]
+        cheatModeOn = False
+        missedCatches = 0
+        gameOver = False
+        cast_with_cheat = False
+        return
+    if gameOver:
+        return
+
+    moveSpeed = 5
+
+    if key == b'u':
+        is_underwater = not is_underwater
+        if is_underwater:
+            surface_cam_pos = camera_pos[:]
+            camera_pos = underwater_cam_pos[:]
+        else:
+            underwater_cam_pos = camera_pos[:]
+            camera_pos = surface_cam_pos[:]
+    elif key == b'w':
+        player_position[0] = player_position[0] + math.sin(math.radians(player_rot)) * moveSpeed
+        player_position[2] = player_position[2] - math.cos(math.radians(player_rot)) * moveSpeed
+    elif key == b's':
+        player_position[0] = player_position[0] - math.sin(math.radians(player_rot)) * moveSpeed
+        player_position[2] = player_position[2] + math.cos(math.radians(player_rot)) * moveSpeed
+    elif key == b'a':
+        player_rot = player_rot + 5
+    elif key == b'd':
+        player_rot = player_rot - 5
+    elif key == b' ':
+        if not fishing_line_is_active and not cheatModeOn:
+            fishing_line_is_active = True
+            hook_is_cast = True
+            hookPos = [player_position[0], WATER_LVL, player_position[2]]
+            hookCastAngle = player_rot
+            hookCastDistance = 50
+            cast_with_cheat = False
+    elif key == b'f':
+        if fishing_line_is_active:
+            hook_is_cast = False
+    elif key == b'c':
+        cheatModeOn = not cheatModeOn
+        if cheatModeOn:
+            print("CHEAT MODE: ON")
+        else:
+            print("CHEAT MODE: OFF")
+        cast_with_cheat = False
+    elif key == b'p':
+        isPaused = not isPaused
+
+    if player_position[0] > GRID_LENGTH / 3:
+        player_position[0] = GRID_LENGTH / 3
+    if player_position[0] < -GRID_LENGTH / 3:
+        player_position[0] = -GRID_LENGTH / 3
+    if player_position[2] > GRID_LENGTH / 3:
+        player_position[2] = GRID_LENGTH / 3
+    if player_position[2] < -GRID_LENGTH / 3:
+        player_position[2] = -GRID_LENGTH / 3
+
+
+def specialKeyHandler(key, x, y):
+    global camera_pos, underwater_cam_pos, surface_cam_pos, is_underwater
+
+    cameraSpeed = 10
+
+    if key == GLUT_KEY_UP:
+        if is_underwater:
+            camera_pos[1] = camera_pos[1] + cameraSpeed
+            if camera_pos[1] > WATER_LVL - 10:
+                camera_pos[1] = WATER_LVL - 10
+        else:
+            camera_pos[1] = camera_pos[1] + cameraSpeed
+            if camera_pos[1] > 200:
+                camera_pos[1] = 200
+    elif key == GLUT_KEY_DOWN:
+        if is_underwater:
+            camera_pos[1] = camera_pos[1] - cameraSpeed
+            if camera_pos[1] < -80:
+                camera_pos[1] = -80
+        else:
+            camera_pos[1] = camera_pos[1] - cameraSpeed
+            if camera_pos[1] < 50:
+                camera_pos[1] = 50
+    elif key == GLUT_KEY_LEFT:
+        angle = math.atan2(camera_pos[0], camera_pos[2])
+        angle = angle - 0.1
+        distance = math.sqrt(camera_pos[0] * camera_pos[0] + camera_pos[2] * camera_pos[2])
+        camera_pos[0] = distance * math.sin(angle)
+        camera_pos[2] = distance * math.cos(angle)
+    elif key == GLUT_KEY_RIGHT:
+        angle = math.atan2(camera_pos[0], camera_pos[2])
+        angle = angle + 0.1
+        distance = math.sqrt(camera_pos[0] * camera_pos[0] + camera_pos[2] * camera_pos[2])
+        camera_pos[0] = distance * math.sin(angle)
+        camera_pos[2] = distance * math.cos(angle)
+
+    if is_underwater:
+        underwater_cam_pos = camera_pos[:]
+    else:
+        surface_cam_pos = camera_pos[:]
+
+
+def mouseHandler(button, state, x, y):
+    global fishing_line_is_active, hook_is_cast, hookPos, hookCastAngle, hookCastDistance, auto_cast_time, cast_with_cheat
+
+    if cheatModeOn:
+        return
+
+    if button == GLUT_LEFT_BUTTON and state == GLUT_DOWN:
+        if not fishing_line_is_active:
+            centerX = 500
+            centerY = 400
+            deltaX = x - centerX
+            deltaY = centerY - y
+
+            hookCastAngle = player_rot + (deltaX / 10)
+            hookCastDistance = abs(deltaY) / 2
+            if hookCastDistance > 100:
+                hookCastDistance = 100
+
+            fishing_line_is_active = True
+            hook_is_cast = True
+            hookPos = [player_position[0], WATER_LVL, player_position[2]]
+            cast_with_cheat = cheatModeOn
+
+    elif button == GLUT_RIGHT_BUTTON and state == GLUT_DOWN:
+        if fishing_line_is_active:
+            hook_is_cast = False
+
+
+def setupCameraView():
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(fovY, 1.25, 0.1, 1500)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+
+    x = camera_pos[0]
+    y = camera_pos[1]
+    z = camera_pos[2]
+
+    if is_underwater:
+        gluLookAt(x, y, z,
+                  0, y, 0,
+                  0, 1, 0)
+    else:
+        gluLookAt(x, y, z,
+                  player_position[0], player_position[1], player_position[2],
+                  0, 1, 0)
+
+
+def idleFunction():
+    global waveTime, gameTime
+
+    if not isPaused and not gameOver:
+        waveTime = waveTime + animSpeed
+        gameTime = time.time() - startTime
+
+        for fish in fishList:
+            fish.update()
+
+        autoPlayFunction()
+        updateHook()
+
+    glutPostRedisplay()
+
+
+def displayFunction():
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glLoadIdentity()
+    glViewport(0, 0, 1000, 800)
+
+    setupCameraView()
+
+    drawEnvironment()
+    drawWaterSurface()
+    drawBubbles()
+
+    drawAllShapes()
+
+    if is_underwater:
+        viewText = "UNDERWATER VIEW"
+    else:
+        viewText = "SURFACE VIEW"
+
+    ScoreForNextlevel = (currentLevel * fish_per_level) - score
+    drawText(10, 770, viewText + " | Score: " + str(score) + " | Level: " + str(currentLevel) + " | Score for Next Level: " + str(ScoreForNextlevel) + " | Misses: " + str(missedCatches) + "/" + str(maxMisses))
+
+    if gameOver:
+        drawText(350, 400, "GAME OVER!", GLUT_BITMAP_HELVETICA_18)
+        drawText(320, 350, "Too many misses! (" + str(missedCatches) + "/" + str(maxMisses) + ")")
+        drawText(340, 300, "Press R to Restart", GLUT_BITMAP_HELVETICA_18)
+
+    if cheatModeOn:
+        glColor3f(1, 0, 0)
+        drawText(10, 710, "CHEAT MODE: ON")
+
+    if is_underwater:
+        drawText(10, 100, "W/A/S/D: Forward/Back/Turn Boat | U: Surface View")
+        drawText(10, 60, "Left Click: Cast | Right Click: Reel  | C: Cheat | R: Restart | P: Pause")
+    else:
+        drawText(10, 30, "W/A/S/D: Forward/Back/Turn Boat | U: Surface View")
+        drawText(10, 60, "Left Click: Cast | C: Cheat | R: Reset | P: Pause")
+        drawText(10, 90, "Press U to go underwater and see fish better!")
+
+    if isPaused:
+        drawText(450, 400, "PAUSED", GLUT_BITMAP_HELVETICA_18)
+
+    if not is_underwater and score == 0:
+        drawText(300, 300, "Welcome to 3D Fishing Game!", GLUT_BITMAP_HELVETICA_18)
+        drawText(350, 270, "Press U to dive underwater!", GLUT_BITMAP_HELVETICA_18)
+
+    glutSwapBuffers()
+
+
+def main():
+    glutInit()
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    glutInitWindowSize(1000, 800)
+    glutInitWindowPosition(0, 0)
+    window = glutCreateWindow(b"3D Fishing Game")
+    spawnFish()
+
+    glutDisplayFunc(displayFunction)
+    glutKeyboardFunc(keyboardHandler)
+    glutSpecialFunc(specialKeyHandler)
+    glutMouseFunc(mouseHandler)
+    glutIdleFunc(idleFunction)
+
+    glutMainLoop()
+
+if __name__ == "__main__":
+    main()
